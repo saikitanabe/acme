@@ -23,6 +23,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -32,7 +34,7 @@ import (
 var (
 	cmdCert = &command{
 		run:       runCert,
-		UsageLine: "cert [-c config] [-d url] [-s host:port] [-k key] [-expiry dur] [-bundle=true] [-manual=false] [-dns=false] domain [domain ...]",
+		UsageLine: "cert [-c config] [-d url] [-s host:port] [-k key] [-expiry dur] [-bundle=true] [-manual=false] [-dns=false] [-postcmd] domain [domain ...]",
 		Short:     "request a new certificate",
 		Long: `
 Cert creates a new certificate for the given domain.
@@ -54,7 +56,9 @@ in which case instructions are displayed on the standard output.
 
 Default location of the config dir is
 {{.ConfigDir}}.
-		`,
+
+-postcmd defines post command if certificate creation was successful. Define e.g. server to reload new certificates.
+`,
 	}
 
 	certDisco   = defaultDiscoFlag
@@ -64,6 +68,7 @@ Default location of the config dir is
 	certManual  = false
 	certDNS     = false
 	certKeypath string
+	postCmd     string
 )
 
 func init() {
@@ -74,6 +79,7 @@ func init() {
 	cmdCert.flag.BoolVar(&certManual, "manual", certManual, "")
 	cmdCert.flag.BoolVar(&certDNS, "dns", certDNS, "")
 	cmdCert.flag.StringVar(&certKeypath, "k", "", "")
+	cmdCert.flag.StringVar(&postCmd, "postcmd", "", "")
 }
 
 func runCert(args []string) {
@@ -157,6 +163,28 @@ func runCert(args []string) {
 	if err := ioutil.WriteFile(certPath, pemcert, 0644); err != nil {
 		fatalf("write cert: %v", err)
 	}
+
+	if len(postCmd) > 0 {
+		execPostCmd(postCmd)
+	}
+}
+
+func execPostCmd(cmd string) {
+	// post action if certificate creation was successful
+	pacme := filepath.Join(configDir, cmd)
+
+	if _, err := os.Stat(pacme); err == nil {
+		// if post action exists, execute it
+		logf("Executing postacme: %s", pacme)
+		// exists
+		cmd := exec.Command(pacme)
+		stdoutStderr, err := cmd.CombinedOutput()
+		if err != nil {
+			fatalf("Failed to execute %s %v\n", pacme, err)
+		}
+		fmt.Println("post acme: ", string(stdoutStderr))
+	}
+
 }
 
 func authz(ctx context.Context, client *acme.Client, domain string) error {
